@@ -1,0 +1,46 @@
+name: Cast 96kbps MP3 to Caster.fm
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'YouTube URL'
+        required: true
+
+jobs:
+  broadcast:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install -U yt-dlp
+
+      - name: Download & Convert to 96kbps MP3
+        env:
+          VIDEO_URL: ${{ github.event.inputs.url }}
+        run: |
+          mkdir -p output
+          yt-dlp -x --audio-format mp3 --audio-quality 96K -o "output/track.%(ext)s" "$VIDEO_URL"
+          TITLE=$(yt-dlp --get-title "$VIDEO_URL" | tr -d '\n\r"' | cut -c 1-80)
+          echo "TRACK_TITLE=$TITLE" >> $GITHUB_ENV
+
+      - name: Stream Live to Caster.fm with Metadata
+        env:
+          HOST: ${{ secrets.CASTER_HOST }}
+          PORT: ${{ secrets.CASTER_PORT }}
+          MOUNT: ${{ secrets.CASTER_MOUNT }}
+          PASS: ${{ secrets.CASTER_PASSWORD }}
+        run: |
+          ffmpeg -re -i output/track.mp3 \
+            -c:a copy \
+            -content_type audio/mpeg \
+            -ice_name "Auto Radio Stream" \
+            -metadata title="${TRACK_TITLE}" \
+            -f mp3 "icecast://source:${PASS}@${HOST}:${PORT}${MOUNT}"
+
+      - name: Delete Temporary Audio File
+        if: always()
+        run: |
+          rm -rf output/track.mp3 output
+          echo "Temporary audio file wiped."
