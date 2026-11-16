@@ -11,11 +11,14 @@ jobs:
   broadcast:
     runs-on: ubuntu-latest
     steps:
-      - name: Install FFmpeg, Deno, and yt-dlp
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install FFmpeg and yt-dlp
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg curl unzip
-          curl -fsSL https://deno.land | sh
-          echo "$HOME/.deno/bin" >> $GITHUB_PATH
+          sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install -U "yt-dlp[default]"
 
       - name: Download & Convert to 96kbps MP3
