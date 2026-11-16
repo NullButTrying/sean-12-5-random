@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Caster.fm 96kbps Radio Control Panel</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background-color: #f4f4f9;
+      display: flex;
+      justify-content: center;
+      padding: 2rem 1rem;
+      margin: 0;
+    }
+    .card {
+      background: #ffffff;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      width: 100%;
+      max-width: 550px;
+    }
+    h2 { margin-top: 0; color: #1f2937; }
+    .subtitle { font-size: 0.85rem; color: #6b7280; margin-top: -10px; margin-bottom: 16px; }
+    .config-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    input, button {
+      width: 100%;
+      padding: 11px;
+      margin-top: 10px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 0.95rem;
+      box-sizing: border-box;
+    }
+    .full-width { grid-column: span 2; }
+    .action-row {
+      display: flex;
+      gap: 8px;
+    }
+    button {
+      background-color: #dc2626;
+      color: white;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background-color: #2563eb; }
+    button:disabled { background-color: #9ca3af; cursor: not-allowed; }
+    #status {
+      margin-top: 14px;
+      font-size: 0.9rem;
+      color: #111827;
+      line-height: 1.45;
+    }
+    #results {
+      margin-top: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .result-item {
+      display: flex;
+      gap: 12px;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 10px;
+      align-items: center;
+      background: #f9fafb;
+    }
+    .result-item img {
+      width: 110px;
+      height: 62px;
+      object-fit: cover;
+      border-radius: 6px;
+    }
+    .result-info { flex: 1; min-width: 0; }
+    .result-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: #111827;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .result-meta { font-size: 0.8rem; color: #6b7280; margin-top: 4px; }
+    .result-item button {
+      width: auto;
+      padding: 8px 12px;
+      margin-top: 0;
+      font-size: 0.85rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Caster.fm Live Broadcaster</h2>
+    <p class="subtitle">Search YouTube, convert to 96 kbps MP3, stream live, and auto-delete.</p>
+
+    <div class="config-grid">
+      <input type="text" id="owner" placeholder="GitHub Username" oninput="saveConfig()">
+      <input type="text" id="repo" placeholder="Repository Name" oninput="saveConfig()">
+      <input type="password" id="token" class="full-width" placeholder="Fine-Grained GitHub Token" oninput="saveConfig()">
+    </div>
+
+    <input type="text" id="queryInput" placeholder="Search YouTube keywords or paste direct URL...">
+    
+    <div class="action-row">
+      <button id="searchBtn" class="secondary" onclick="runSearch()">Search YouTube</button>
+      <button id="castBtn" onclick="triggerBroadcast()">Cast URL Live</button>
+    </div>
+
+    <div id="status"></div>
+    <div id="results"></div>
+  </div>
+
+  <script>
+    window.onload = () => {
+      document.getElementById("owner").value = localStorage.getItem("gh_owner") || "";
+      document.getElementById("repo").value = localStorage.getItem("gh_repo") || "";
+      document.getElementById("token").value = localStorage.getItem("gh_token") || "";
+    };
+
+    function saveConfig() {
+      localStorage.setItem("gh_owner", document.getElementById("owner").value.trim());
+      localStorage.setItem("gh_repo", document.getElementById("repo").value.trim());
+      localStorage.setItem("gh_token", document.getElementById("token").value.trim());
+    }
+
+    function getCredentials() {
+      return {
+        owner: document.getElementById("owner").value.trim(),
+        repo: document.getElementById("repo").value.trim(),
+        token: document.getElementById("token").value.trim()
+      };
+    }
+
+    function setButtonsDisabled(state) {
+      document.getElementById("searchBtn").disabled = state;
+      document.getElementById("castBtn").disabled = state;
+    }
+
+    async function runSearch() {
+      const { owner, repo, token } = getCredentials();
+      const query = document.getElementById("queryInput").value.trim();
+      const status = document.getElementById("status");
+      const resultsDiv = document.getElementById("results");
+
+      if (!owner || !repo || !token || !query) {
+        status.textContent = "Please enter your GitHub credentials and a search term.";
+        return;
+      }
+
+      setButtonsDisabled(true);
+      resultsDiv.innerHTML = "";
+      status.textContent = "Searching YouTube via GitHub Actions (~15–20 seconds)...";
+
+      const dispatchUrl = `https://github.com{owner}/${repo}/actions/workflows/search.yml/dispatches`;
+      const res = await fetch(dispatchUrl, {
+        method: "POST",
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ ref: "main", inputs: { query } })
+      });
+
+      if (res.status !== 204) {
+        status.textContent = "Failed to start search. Verify your repository name, branch ('main'), and token permissions.";
+        setButtonsDisabled(false);
+        return;
+      }
+
+      await waitForLatestRun(owner, repo, token, "search.yml");
+      await loadResults(owner, repo, token);
+      setButtonsDisabled(false);
+    }
+
+    async function waitForLatestRun(owner, repo, token, workflowFile) {
+      await new Promise(r => setTimeout(r, 4000));
+      const runsUrl = `https://github.com{owner}/${repo}/actions/workflows/${workflowFile}/runs?per_page=1`;
+
+      for (let i = 0; i < 25; i++) {
+        const res = await fetch(runsUrl, {
+          headers: { "Authorization": `Bearer ${token}` },
+          cache: "no-store"
+        });
+        const data = await res.json();
+        const latestRun = data.workflow_runs && data.workflow_runs;
+
+        if (latestRun && latestRun.status === "completed") {
+          return;
+        }
+        await new Promise(r => setTimeout(r, 3000));
+      }
+    }
+
+    async function loadResults(owner, repo, token) {
+      const status = document.getElementById("status");
+      const resultsDiv = document.getElementById("results");
+
+      const fileUrl = `https://github.com{owner}/${repo}/contents/results.json`;
+      const res = await fetch(fileUrl, {
+        headers: {
+          "Accept": "application/vnd.github.raw+json",
+          "Authorization": `Bearer ${token}`
+        },
+        cache: "no-store"
+      });
+
+      if (!res.ok) {
+        status.textContent = "Could not load search results. Check your repository's Actions tab for logs.";
+        return;
+      }
+
+      const items = await res.json();
+      status.textContent = `Found ${items.length} results:`;
+
+      items.forEach(item => {
+        const card = document.createElement("div");
+        card.className = "result-item";
+        card.innerHTML = `
+          <img src="${item.thumbnail}" alt="Thumbnail">
+          <div class="result-info">
+            <div class="result-title" title="${item.title}">${item.title}</div>
+            <div class="result-meta">Duration: ${item.duration}</div>
+          </div>
+          <button onclick="triggerBroadcast('${item.url}')">Cast Live</button>
+        `;
+        resultsDiv.appendChild(card);
+      });
+    }
+
+    async function triggerBroadcast(selectedUrl) {
+      const { owner, repo, token } = getCredentials();
+      const url = selectedUrl || document.getElementById("queryInput").value.trim();
+      const status = document.getElementById("status");
+
+      if (!owner || !repo || !token || !url) {
+        status.textContent = "Please fill in your credentials and select a track.";
+        return;
+      }
+
+      setButtonsDisabled(true);
+      status.textContent = "Dispatching broadcast workflow...";
+
+      const apiUrl = `https://github.com{owner}/${repo}/actions/workflows/broadcast.yml/dispatches`;
+      const response = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Accept": "application/vnd.github+json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          ref: "main",
+          inputs: { url }
+        })
+      });
+
+      if (response.status === 204) {
+        status.innerHTML = `<strong>On Air Soon!</strong> GitHub Actions is converting the track to 96 kbps MP3 and will begin streaming to Caster.fm in ~20 seconds. The audio file will automatically delete when playback ends. View live status in your <a href="https://github.com{owner}/${repo}/actions" target="_blank">Actions tab</a>.`;
+      } else {
+        status.textContent = "Error starting broadcast workflow. Check your token and URL.";
+      }
+      setButtonsDisabled(false);
+    }
+  </script>
+</body>
+</html>
