@@ -20,7 +20,7 @@ jobs:
       - name: Install yt-dlp
         run: pip install -U yt-dlp
 
-      - name: Run Search
+      - name: Run SoundCloud Search
         env:
           SEARCH_QUERY: ${{ github.event.inputs.query }}
         run: |
@@ -31,15 +31,14 @@ jobs:
           ydl_opts = {"extract_flat": True, "quiet": True}
 
           with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-              info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+              info = ydl.extract_info(f"scsearch5:{query}", download=False)
               results = []
               for entry in info.get("entries", []):
-                  vid_id = entry.get("id")
                   results.append({
-                      "title": entry.get("title"),
-                      "url": f"https://youtube.com{vid_id}",
+                      "title": entry.get("title") or "Unknown Track",
+                      "url": entry.get("url") or entry.get("webpage_url"),
                       "duration": entry.get("duration_string", "N/A"),
-                      "thumbnail": f"https://ytimg.com{vid_id}/mqdefault.jpg"
+                      "thumbnail": entry.get("thumbnail") or "https://sndcdn.com"
                   })
 
           with open("results.json", "w") as f:
