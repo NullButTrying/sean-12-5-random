@@ -4,51 +4,26 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: 'YouTube URL'
+        description: 'Audio URL'
         required: true
 
 jobs:
   broadcast:
     runs-on: ubuntu-latest
-    services:
-      cobalt:
-        image: ghcr.io/imputnet/cobalt:latest
-        ports:
-          - 9000:9000
-        env:
-          API_URL: "http://localhost:9000/"
-          API_AUTH_REQUIRED: "false"
-
     steps:
-      - name: Install Dependencies
+      - name: Install FFmpeg and yt-dlp
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg jq curl
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          pip install -U yt-dlp
 
-      - name: Fetch Audio via Local Cobalt Instance
+      - name: Download & Convert to 96kbps MP3
         env:
-          VIDEO_URL: ${{ github.event.inputs.url }}
+          AUDIO_URL: ${{ github.event.inputs.url }}
         run: |
           mkdir -p output
-          sleep 3
-
-          RESPONSE=$(curl -s -X POST "http://localhost:9000/" \
-            -H "Accept: application/json" \
-            -H "Content-Type: application/json" \
-            -d "{\"url\": \"${VIDEO_URL}\", \"downloadMode\": \"audio\", \"audioFormat\": \"mp3\", \"audioBitrate\": \"96\"}")
-
-          STREAM_URL=$(echo "$RESPONSE" | jq -r '.url // empty')
-          TITLE=$(echo "$RESPONSE" | jq -r '.filename // "Live Radio Track"' | sed 's/\.[^.]*$//' | tr -d '\n\r"' | cut -c 1-80)
-
-          if [ -z "$STREAM_URL" ]; then
-            echo "Cobalt failed to extract audio: $RESPONSE"
-            exit 1
-          fi
-
+          yt-dlp -x --audio-format mp3 --audio-quality 96K -o "output/track.%(ext)s" "$AUDIO_URL"
+          TITLE=$(yt-dlp --get-title "$AUDIO_URL" | tr -d '\n\r"' | cut -c 1-80)
           echo "TRACK_TITLE=$TITLE" >> $GITHUB_ENV
-          curl -L -s "$STREAM_URL" -o output/raw_audio
-
-          ffmpeg -y -i output/raw_audio -vn -ar 44100 -ac 2 -b:a 96k output/track.mp3
-          rm -f output/raw_audio
 
       - name: Stream Live to Caster.fm with Metadata
         env:
