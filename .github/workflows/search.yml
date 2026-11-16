@@ -1,0 +1,55 @@
+name: Media Search
+
+on:
+  workflow_dispatch:
+    inputs:
+      query:
+        description: 'Search keywords'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install yt-dlp
+        run: pip install -U yt-dlp
+
+      - name: Run Search
+        env:
+          SEARCH_QUERY: ${{ github.event.inputs.query }}
+        run: |
+          python3 -c '
+          import os, json, yt_dlp
+
+          query = os.environ["SEARCH_QUERY"]
+          ydl_opts = {"extract_flat": True, "quiet": True}
+
+          with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+              info = ydl.extract_info(f"ytsearch5:{query}", download=False)
+              results = []
+              for entry in info.get("entries", []):
+                  vid_id = entry.get("id")
+                  results.append({
+                      "title": entry.get("title"),
+                      "url": f"https://youtube.com{vid_id}",
+                      "duration": entry.get("duration_string", "N/A"),
+                      "thumbnail": f"https://ytimg.com{vid_id}/mqdefault.jpg"
+                  })
+
+          with open("results.json", "w") as f:
+              json.dump(results, f, indent=2)
+          '
+
+      - name: Commit results.json
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@://github.com"
+          git add results.json
+          git commit -m "Update search results" || exit 0
+          git push
