@@ -13,37 +13,56 @@ jobs:
     steps:
       - name: Install FFmpeg and yt-dlp
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg
+          sudo apt-get update && sudo apt-get install -y ffmpeg curl
           pip install -U yt-dlp
 
-      - name: Search/Download & Convert to 96kbps MP3
+      - name: Search/Download & Convert to Strict 96kbps MP3
         env:
           INPUT_QUERY: ${{ github.event.inputs.query }}
         run: |
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
             TARGET="$INPUT_QUERY"
+            RAW_TITLE=$(yt-dlp --get-title "$TARGET")
           else
             TARGET="scsearch1:$INPUT_QUERY"
+            RAW_TITLE="$INPUT_QUERY"
           fi
 
-          yt-dlp -x --audio-format mp3 --audio-quality 96K -o "output/track.%(ext)s" "$TARGET"
-          TITLE=$(yt-dlp --get-title "$TARGET" | tr -d '\n\r"' | cut -c 1-80)
-          echo "TRACK_TITLE=$TITLE" >> $GITHUB_ENV
+          yt-dlp -x --audio-format mp3 --postprocessor-args "ffmpeg:-b:a 96k -ar 44100 -ac 2" -o "output/track.%(ext)s" "$TARGET"
+          CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r"' | cut -c 1-80)
+          echo "TRACK_TITLE=$CLEAN_TITLE" >> $GITHUB_ENV
 
-      - name: Stream Live to Caster.fm with Metadata
+      - name: Stream Live to Caster.fm & Update Now Playing
         env:
           HOST: ${{ secrets.CASTER_HOST }}
           PORT: ${{ secrets.CASTER_PORT }}
           MOUNT: ${{ secrets.CASTER_MOUNT }}
           PASS: ${{ secrets.CASTER_PASSWORD }}
         run: |
+          CLEAN_HOST=$(echo "$HOST" | sed -E 's|^https?://||; s|/.*||; s|:.*||' | tr -d '[:space:]')
+          CLEAN_PORT=$(echo "$PORT" | tr -d '[:space:]')
+          CLEAN_MOUNT=$(echo "$MOUNT" | tr -d '[:space:]')
+          [[ "$CLEAN_MOUNT" != /* ]] && CLEAN_MOUNT="/$CLEAN_MOUNT"
+
+          IPV4=$(getent ahostsv4 "$CLEAN_HOST" | awk '{print $1; exit}')
+          TARGET_HOST=${IPV4:-$CLEAN_HOST}
+
+          # Start FFmpeg stream in the background
           ffmpeg -re -i output/track.mp3 \
             -c:a copy \
             -content_type audio/mpeg \
-            -ice_name "Auto Radio Stream" \
-            -metadata title="${TRACK_TITLE}" \
-            -f mp3 "icecast://source:${PASS}@${HOST}:${PORT}${MOUNT}"
+            -ice_name "Live Auto Radio" \
+            -f mp3 "icecast://source:${PASS}@${TARGET_HOST}:${CLEAN_PORT}${CLEAN_MOUNT}" &
+          FFMPEG_PID=$!
+
+          # Wait 4 seconds for mountpoint to connect, then push Now Playing metadata to Icecast
+          sleep 4
+          ENCODED_SONG=$(python3 -c 'import urllib.parse, os; print(urllib.parse.quote(os.environ["TRACK_TITLE"]))')
+          curl -s -u "source:${PASS}" "http://${TARGET_HOST}:${CLEAN_PORT}/admin/metadata?mount=${CLEAN_MOUNT}&mode=updinfo&song=${ENCODED_SONG}" || true
+
+          # Wait until the song finishes playing
+          wait $FFMPEG_PID
 
       - name: Delete Temporary Audio File
         if: always()
