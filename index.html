@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Caster.fm Instant Search & Broadcaster</title>
+  <title>Caster.fm Direct Broadcaster</title>
   <style>
     body {
       font-family: system-ui, -apple-system, sans-serif;
@@ -19,183 +19,128 @@
       border-radius: 12px;
       box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
       width: 100%;
-      max-width: 540px;
+      max-width: 500px;
     }
     h2 {
       margin-top: 0;
       color: #1f2937;
     }
     .sub {
-      font-size: 0.85rem;
+      font-size: 0.88rem;
       color: #6b7280;
       margin-top: -10px;
-      margin-bottom: 14px;
-    }
-    .search-row {
-      display: flex;
-      gap: 8px;
+      margin-bottom: 16px;
+      line-height: 1.4;
     }
     input {
-      flex: 1;
+      width: 100%;
       padding: 12px;
       border-radius: 8px;
       border: 1px solid #d1d5db;
       font-size: 1rem;
+      box-sizing: border-box;
     }
     button {
-      padding: 12px 18px;
+      width: 100%;
+      margin-top: 12px;
+      padding: 12px;
       border-radius: 8px;
       border: none;
-      background: #ff5500;
+      background: #dc2626;
       color: #ffffff;
       font-weight: 600;
       cursor: pointer;
-      font-size: 0.95rem;
-    }
-    button.cast-btn {
-      background: #dc2626;
-      padding: 8px 14px;
-      font-size: 0.85rem;
+      font-size: 1rem;
     }
     #status {
       margin-top: 14px;
       font-size: 0.9rem;
       background: #f3f4f6;
-      padding: 10px;
+      padding: 12px;
       border-radius: 8px;
       color: #111827;
-      line-height: 1.4;
+      line-height: 1.45;
     }
-    #results {
+    .history {
       margin-top: 16px;
       display: flex;
       flex-direction: column;
-      gap: 10px;
+      gap: 8px;
     }
-    .item {
+    .hist-item {
       display: flex;
-      gap: 12px;
+      justify-content: space-between;
       align-items: center;
-      border: 1px solid #e5e7eb;
-      padding: 10px;
-      border-radius: 8px;
+      padding: 8px 12px;
       background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      font-size: 0.9rem;
     }
-    .item img {
-      width: 60px;
-      height: 60px;
-      border-radius: 6px;
-      object-fit: cover;
-    }
-    .info {
-      flex: 1;
-      min-width: 0;
-    }
-    .title {
-      font-weight: 600;
-      font-size: 0.95rem;
-      color: #111827;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-    .artist {
+    .hist-item button {
+      width: auto;
+      margin: 0;
+      padding: 6px 12px;
       font-size: 0.82rem;
-      color: #6b7280;
-      margin-top: 2px;
+      background: #2563eb;
     }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>Caster.fm Radio Search</h2>
-    <p class="sub">Search any song instantly, then cast to your 96 kbps stream.</p>
+    <h2>Caster.fm 96kbps Broadcaster</h2>
+    <p class="sub">Type any song name or SoundCloud URL. GitHub Actions will automatically search SoundCloud, convert to 96 kbps MP3, cast live, and delete the file.</p>
 
-    <div class="search-row">
-      <input type="text" id="q" placeholder="Type song or artist name..." onkeydown="if(event.key==='Enter') searchSongs()">
-      <button onclick="searchSongs()">Search</button>
-    </div>
+    <input type="text" id="q" placeholder="e.g. Daft Punk - One More Time" onkeydown="if(event.key==='Enter') castNow()">
+    <button onclick="castNow()">Copy & Open Broadcaster</button>
 
-    <div id="status">Ready. Type a song name and press Search.</div>
-    <div id="results"></div>
+    <div id="status">Ready. Type a song name above to broadcast.</div>
+    <div id="history" class="history"></div>
   </div>
 
   <script>
-    const WORKFLOW_PAGE = "https://github.com";
+    const WORKFLOW_URL = "https://github.com";
+    let recent = JSON.parse(localStorage.getItem("caster_recent") || "[]");
 
-    function searchSongs() {
-      const q = document.getElementById("q").value.trim();
-      const status = document.getElementById("status");
-      const resultsDiv = document.getElementById("results");
-      if (!q) return;
-
-      status.textContent = "Searching...";
-      resultsDiv.innerHTML = "";
-
-      const oldScript = document.getElementById("jsonpScript");
-      if (oldScript) oldScript.remove();
-
-      const script = document.createElement("script");
-      script.id = "jsonpScript";
-      script.src = `https://apple.com{encodeURIComponent(q)}&media=music&limit=8&callback=handleResults`;
-      script.onerror = () => {
-        status.textContent = "Search blocked by network filter.";
-      };
-      document.body.appendChild(script);
-    }
-
-    function handleResults(data) {
-      const status = document.getElementById("status");
-      const resultsDiv = document.getElementById("results");
-
-      if (!data.results || data.results.length === 0) {
-        status.textContent = "No songs found. Try another search term.";
-        return;
-      }
-
-      status.textContent = `Found ${data.results.length} tracks — click Cast Live to copy & open your broadcaster:`;
-
-      data.results.forEach(track => {
-        const fullName = `${track.artistName} - ${track.trackName}`;
-        const mins = Math.floor(track.trackTimeMillis / 60000);
-        const secs = String(Math.floor((track.trackTimeMillis % 60000) / 1000)).padStart(2, "0");
-
-        const card = document.createElement("div");
-        card.className = "item";
-
-        const img = document.createElement("img");
-        img.src = track.artworkUrl100;
-        img.alt = "Cover";
-
-        const info = document.createElement("div");
-        info.className = "info";
-        info.innerHTML = `
-          <div class="title" title="${fullName}">${track.trackName}</div>
-          <div class="artist">${track.artistName} • ${mins}:${secs}</div>
-        `;
-
+    function renderHistory() {
+      const div = document.getElementById("history");
+      div.innerHTML = "";
+      recent.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "hist-item";
+        row.innerHTML = `<span>${item}</span>`;
         const btn = document.createElement("button");
-        btn.className = "cast-btn";
-        btn.textContent = "Cast Live";
-        btn.onclick = () => castSong(fullName);
-
-        card.appendChild(img);
-        card.appendChild(info);
-        card.appendChild(btn);
-        resultsDiv.appendChild(card);
+        btn.textContent = "Re-cast";
+        btn.onclick = () => trigger(item);
+        row.appendChild(btn);
+        div.appendChild(row);
       });
     }
 
-    async function castSong(songTitle) {
+    function castNow() {
+      const q = document.getElementById("q").value.trim();
+      if (!q) return;
+      if (!recent.includes(q)) {
+        recent.unshift(q);
+        recent = recent.slice(0, 6);
+        localStorage.setItem("caster_recent", JSON.stringify(recent));
+        renderHistory();
+      }
+      trigger(q);
+    }
+
+    async function trigger(query) {
       const status = document.getElementById("status");
       try {
-        await navigator.clipboard.writeText(songTitle);
-        status.innerHTML = `Copied <strong>"${songTitle}"</strong>! In the GitHub tab that just opened, click <strong>Run workflow</strong>, paste (Cmd+V), and click <strong>Run workflow</strong>.`;
+        await navigator.clipboard.writeText(query);
+        status.innerHTML = `Copied <strong>"${query}"</strong>!<br>In the GitHub tab that just opened:<br>1. Click <strong>Run workflow</strong><br>2. Paste (<strong>Cmd+V</strong>) into the box<br>3. Click the green <strong>Run workflow</strong> button.`;
       } catch {
-        status.innerHTML = `Copy this title: <strong>${songTitle}</strong> — then paste it into <strong>Run workflow</strong> on GitHub.`;
+        status.innerHTML = `Copy <strong>"${query}"</strong> and paste it into <strong>Run workflow</strong> on GitHub.`;
       }
-      window.open(WORKFLOW_PAGE, "_blank");
+      window.open(WORKFLOW_URL, "_blank");
     }
+
+    renderHistory();
   </script>
 </body>
 </html>
