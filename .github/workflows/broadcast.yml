@@ -3,8 +3,8 @@ name: Cast 96kbps MP3 to Caster.fm
 on:
   workflow_dispatch:
     inputs:
-      url:
-        description: 'Audio URL'
+      query:
+        description: 'Song Name or SoundCloud URL'
         required: true
 
 jobs:
@@ -16,13 +16,19 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ffmpeg
           pip install -U yt-dlp
 
-      - name: Download & Convert to 96kbps MP3
+      - name: Search/Download & Convert to 96kbps MP3
         env:
-          AUDIO_URL: ${{ github.event.inputs.url }}
+          INPUT_QUERY: ${{ github.event.inputs.query }}
         run: |
           mkdir -p output
-          yt-dlp -x --audio-format mp3 --audio-quality 96K -o "output/track.%(ext)s" "$AUDIO_URL"
-          TITLE=$(yt-dlp --get-title "$AUDIO_URL" | tr -d '\n\r"' | cut -c 1-80)
+          if [[ "$INPUT_QUERY" == http* ]]; then
+            TARGET="$INPUT_QUERY"
+          else
+            TARGET="scsearch1:$INPUT_QUERY"
+          fi
+
+          yt-dlp -x --audio-format mp3 --audio-quality 96K -o "output/track.%(ext)s" "$TARGET"
+          TITLE=$(yt-dlp --get-title "$TARGET" | tr -d '\n\r"' | cut -c 1-80)
           echo "TRACK_TITLE=$TITLE" >> $GITHUB_ENV
 
       - name: Stream Live to Caster.fm with Metadata
