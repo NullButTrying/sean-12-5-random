@@ -3,144 +3,183 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Caster.fm Direct Broadcaster</title>
+  <title>Caster.fm Live Radio Studio</title>
   <style>
     body {
       font-family: system-ui, -apple-system, sans-serif;
-      background: #f4f4f9;
+      background: #0f172a;
+      color: #f8fafc;
       display: flex;
       justify-content: center;
       padding: 2rem 1rem;
       margin: 0;
     }
     .card {
-      background: #ffffff;
+      background: #1e293b;
       padding: 2rem;
-      border-radius: 12px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      border-radius: 16px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
       width: 100%;
-      max-width: 500px;
+      max-width: 560px;
     }
-    h2 {
-      margin-top: 0;
-      color: #1f2937;
-    }
-    .sub {
-      font-size: 0.88rem;
-      color: #6b7280;
-      margin-top: -10px;
-      margin-bottom: 16px;
-      line-height: 1.4;
-    }
+    h2 { margin-top: 0; color: #ffffff; display: flex; align-items: center; gap: 10px; }
+    .badge { background: #dc2626; font-size: 0.75rem; padding: 3px 8px; border-radius: 99px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .search-row { display: flex; gap: 8px; margin-top: 16px; }
     input {
-      width: 100%;
-      padding: 12px;
-      border-radius: 8px;
-      border: 1px solid #d1d5db;
+      flex: 1;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #ffffff;
       font-size: 1rem;
-      box-sizing: border-box;
+      outline: none;
     }
+    input:focus { border-color: #38bdf8; }
     button {
-      width: 100%;
-      margin-top: 12px;
-      padding: 12px;
-      border-radius: 8px;
+      padding: 12px 18px;
+      border-radius: 10px;
       border: none;
-      background: #dc2626;
+      background: #2563eb;
       color: #ffffff;
       font-weight: 600;
       cursor: pointer;
-      font-size: 1rem;
+      font-size: 0.95rem;
+      transition: opacity 0.15s;
     }
+    button:hover { opacity: 0.9; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.stop { background: #475569; }
+    button.cast { background: #dc2626; padding: 8px 14px; font-size: 0.85rem; }
     #status {
-      margin-top: 14px;
-      font-size: 0.9rem;
-      background: #f3f4f6;
-      padding: 12px;
-      border-radius: 8px;
-      color: #111827;
-      line-height: 1.45;
-    }
-    .history {
       margin-top: 16px;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .hist-item {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 12px;
-      background: #f9fafb;
-      border: 1px solid #e5e7eb;
-      border-radius: 8px;
       font-size: 0.9rem;
+      background: #0f172a;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #334155;
+      color: #cbd5e1;
     }
-    .hist-item button {
-      width: auto;
-      margin: 0;
-      padding: 6px 12px;
-      font-size: 0.82rem;
-      background: #2563eb;
+    #results { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+    .item {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      background: #0f172a;
+      border: 1px solid #334155;
+      padding: 10px;
+      border-radius: 10px;
     }
+    .item img { width: 56px; height: 56px; border-radius: 8px; object-fit: cover; }
+    .info { flex: 1; min-width: 0; }
+    .title { font-weight: 600; font-size: 0.95rem; color: #f8fafc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .artist { font-size: 0.82rem; color: #94a3b8; margin-top: 3px; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h2>Caster.fm 96kbps Broadcaster</h2>
-    <p class="sub">Type any song name or SoundCloud URL. GitHub Actions will automatically search SoundCloud, convert to 96 kbps MP3, cast live, and delete the file.</p>
+    <h2>Caster.fm Studio <span class="badge">96 kbps Live</span></h2>
 
-    <input type="text" id="q" placeholder="e.g. Daft Punk - One More Time" onkeydown="if(event.key==='Enter') castNow()">
-    <button onclick="castNow()">Copy & Open Broadcaster</button>
+    <div class="search-row">
+      <input type="text" id="q" placeholder="Search any song or artist..." onkeydown="if(event.key==='Enter') searchSongs()">
+      <button id="sBtn" onclick="searchSongs()">Search</button>
+      <button class="stop" onclick="stopCast()">Stop</button>
+    </div>
 
-    <div id="status">Ready. Type a song name above to broadcast.</div>
-    <div id="history" class="history"></div>
+    <div id="status">Ready. Search for a song to broadcast live.</div>
+    <div id="results"></div>
   </div>
 
   <script>
-    const WORKFLOW_URL = "https://github.com";
-    let recent = JSON.parse(localStorage.getItem("caster_recent") || "[]");
+    // PASTE YOUR CLOUDFLARE WORKER URL BELOW:
+    const RELAY_URL = "caster-relay.19a29.workers.dev";
 
-    function renderHistory() {
-      const div = document.getElementById("history");
-      div.innerHTML = "";
-      recent.forEach(item => {
-        const row = document.createElement("div");
-        row.className = "hist-item";
-        row.innerHTML = `<span>${item}</span>`;
-        const btn = document.createElement("button");
-        btn.textContent = "Re-cast";
-        btn.onclick = () => trigger(item);
-        row.appendChild(btn);
-        div.appendChild(row);
-      });
-    }
+    const statusEl = document.getElementById("status");
+    const resultsDiv = document.getElementById("results");
 
-    function castNow() {
+    async function searchSongs() {
       const q = document.getElementById("q").value.trim();
       if (!q) return;
-      if (!recent.includes(q)) {
-        recent.unshift(q);
-        recent = recent.slice(0, 6);
-        localStorage.setItem("caster_recent", JSON.stringify(recent));
-        renderHistory();
-      }
-      trigger(q);
-    }
 
-    async function trigger(query) {
-      const status = document.getElementById("status");
+      document.getElementById("sBtn").disabled = true;
+      statusEl.textContent = "Searching tracks...";
+      resultsDiv.innerHTML = "";
+
       try {
-        await navigator.clipboard.writeText(query);
-        status.innerHTML = `Copied <strong>"${query}"</strong>!<br>In the GitHub tab that just opened:<br>1. Click <strong>Run workflow</strong><br>2. Paste (<strong>Cmd+V</strong>) into the box<br>3. Click the green <strong>Run workflow</strong> button.`;
-      } catch {
-        status.innerHTML = `Copy <strong>"${query}"</strong> and paste it into <strong>Run workflow</strong> on GitHub.`;
+        const res = await fetch(`${RELAY_URL}/search?q=${encodeURIComponent(q)}`);
+        const tracks = await res.json();
+
+        if (!tracks.length) {
+          statusEl.textContent = "No matching tracks found.";
+          return;
+        }
+
+        statusEl.textContent = `Found ${tracks.length} tracks. Click Cast Live to stream immediately:`;
+
+        tracks.forEach(t => {
+          const fullName = `${t.artistName} - ${t.trackName}`;
+          const mins = Math.floor(t.trackTimeMillis / 60000);
+          const secs = String(Math.floor((t.trackTimeMillis % 60000) / 1000)).padStart(2, "0");
+
+          const row = document.createElement("div");
+          row.className = "item";
+          row.innerHTML = `
+            <img src="${t.artworkUrl100}" alt="Cover">
+            <div class="info">
+              <div class="title" title="${fullName}">${t.trackName}</div>
+              <div class="artist">${t.artistName} • ${mins}:${secs}</div>
+            </div>
+          `;
+
+          const btn = document.createElement("button");
+          btn.className = "cast";
+          btn.textContent = "Cast Live";
+          btn.onclick = () => castTrack(fullName, btn);
+
+          row.appendChild(btn);
+          resultsDiv.appendChild(row);
+        });
+      } catch (err) {
+        statusEl.textContent = "Relay error: " + err.message;
+      } finally {
+        document.getElementById("sBtn").disabled = false;
       }
-      window.open(WORKFLOW_URL, "_blank");
     }
 
-    renderHistory();
+    async function castTrack(query, btn) {
+      btn.disabled = true;
+      btn.textContent = "Starting...";
+      statusEl.textContent = `Queueing "${query}" on Caster.fm...`;
+
+      try {
+        const res = await fetch(`${RELAY_URL}/cast`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query })
+        });
+        const data = await res.json();
+
+        if (data.ok) {
+          statusEl.innerHTML = `<strong>On Air Soon!</strong> "${query}" is converting to 96 kbps MP3 and will play on your Caster.fm station in ~20 seconds (auto-deletes when finished).`;
+          btn.textContent = "Queued";
+        } else {
+          statusEl.textContent = `GitHub rejected request (HTTP ${data.status}). Check GH_TOKEN in Cloudflare.`;
+          btn.disabled = false;
+          btn.textContent = "Cast Live";
+        }
+      } catch (err) {
+        statusEl.textContent = "Cast error: " + err.message;
+        btn.disabled = false;
+        btn.textContent = "Cast Live";
+      }
+    }
+
+    async function stopCast() {
+      statusEl.textContent = "Stopping active broadcast...";
+      const res = await fetch(`${RELAY_URL}/stop`, { method: "POST" });
+      const data = await res.json();
+      statusEl.textContent = data.stopped ? "Active broadcast stopped." : "No song currently broadcasting.";
+    }
   </script>
 </body>
 </html>
