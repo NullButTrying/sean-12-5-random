@@ -5,21 +5,105 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Caster.fm Instant Search & Broadcaster</title>
   <style>
-    body { font-family: system-ui, -apple-system, sans-serif; background: #f4f4f9; display: flex; justify-content: center; padding: 2rem 1rem; margin: 0; }
-    .card { background: #fff; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); width: 100%; max-width: 540px; }
-    h2 { margin-top: 0; color: #1f2937; }
-    .sub { font-size: 0.85rem; color: #6b7280; margin-top: -10px; margin-bottom: 14px; }
-    .search-row { display: flex; gap: 8px; }
-    input { flex: 1; padding: 12px; border-radius: 8px; border: 1px solid #d1d5db; font-size: 1rem; }
-    button { padding: 12px 18px; border-radius: 8px; border: none; background: #ff5500; color: #fff; font-weight: 600; cursor: pointer; font-size: 0.95rem; }
-    button.cast-btn { background: #dc2626; padding: 8px 14px; font-size: 0.85rem; }
-    #status { margin-top: 14px; font-size: 0.9rem; background: #f3f4f6; padding: 10px; border-radius: 8px; color: #111827; }
-    #results { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
-    .item { display: flex; gap: 12px; align-items: center; border: 1px solid #e5e7eb; padding: 10px; border-radius: 8px; background: #f9fafb; }
-    .item img { width: 60px; height: 60px; border-radius: 6px; object-fit: cover; }
-    .info { flex: 1; min-width: 0; }
-    .title { font-weight: 600; font-size: 0.95rem; color: #111827; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .artist { font-size: 0.82rem; color: #6b7280; margin-top: 2px; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f4f4f9;
+      display: flex;
+      justify-content: center;
+      padding: 2rem 1rem;
+      margin: 0;
+    }
+    .card {
+      background: #ffffff;
+      padding: 2rem;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      width: 100%;
+      max-width: 540px;
+    }
+    h2 {
+      margin-top: 0;
+      color: #1f2937;
+    }
+    .sub {
+      font-size: 0.85rem;
+      color: #6b7280;
+      margin-top: -10px;
+      margin-bottom: 14px;
+    }
+    .search-row {
+      display: flex;
+      gap: 8px;
+    }
+    input {
+      flex: 1;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #d1d5db;
+      font-size: 1rem;
+    }
+    button {
+      padding: 12px 18px;
+      border-radius: 8px;
+      border: none;
+      background: #ff5500;
+      color: #ffffff;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.95rem;
+    }
+    button.cast-btn {
+      background: #dc2626;
+      padding: 8px 14px;
+      font-size: 0.85rem;
+    }
+    #status {
+      margin-top: 14px;
+      font-size: 0.9rem;
+      background: #f3f4f6;
+      padding: 10px;
+      border-radius: 8px;
+      color: #111827;
+      line-height: 1.4;
+    }
+    #results {
+      margin-top: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .item {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      border: 1px solid #e5e7eb;
+      padding: 10px;
+      border-radius: 8px;
+      background: #f9fafb;
+    }
+    .item img {
+      width: 60px;
+      height: 60px;
+      border-radius: 6px;
+      object-fit: cover;
+    }
+    .info {
+      flex: 1;
+      min-width: 0;
+    }
+    .title {
+      font-weight: 600;
+      font-size: 0.95rem;
+      color: #111827;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .artist {
+      font-size: 0.82rem;
+      color: #6b7280;
+      margin-top: 2px;
+    }
   </style>
 </head>
 <body>
@@ -39,7 +123,7 @@
   <script>
     const WORKFLOW_PAGE = "https://github.com";
 
-    async function searchSongs() {
+    function searchSongs() {
       const q = document.getElementById("q").value.trim();
       const status = document.getElementById("status");
       const resultsDiv = document.getElementById("results");
@@ -48,37 +132,58 @@
       status.textContent = "Searching...";
       resultsDiv.innerHTML = "";
 
-      try {
-        const res = await fetch(`https://apple.com{encodeURIComponent(q)}&media=music&limit=8`);
-        const data = await res.json();
+      const oldScript = document.getElementById("jsonpScript");
+      if (oldScript) oldScript.remove();
 
-        if (!data.results || data.results.length === 0) {
-          status.textContent = "No songs found. Try another search term.";
-          return;
-        }
+      const script = document.createElement("script");
+      script.id = "jsonpScript";
+      script.src = `https://apple.com{encodeURIComponent(q)}&media=music&limit=8&callback=handleResults`;
+      script.onerror = () => {
+        status.textContent = "Search blocked by network filter.";
+      };
+      document.body.appendChild(script);
+    }
 
-        status.textContent = `Found ${data.results.length} tracks — click Cast Live to copy & open your broadcaster:`;
+    function handleResults(data) {
+      const status = document.getElementById("status");
+      const resultsDiv = document.getElementById("results");
 
-        data.results.forEach(track => {
-          const fullName = `${track.artistName} - ${track.trackName}`;
-          const mins = Math.floor(track.trackTimeMillis / 60000);
-          const secs = String(Math.floor((track.trackTimeMillis % 60000) / 1000)).padStart(2, "0");
-
-          const card = document.createElement("div");
-          card.className = "item";
-          card.innerHTML = `
-            <img src="${track.artworkUrl100}" alt="Cover">
-            <div class="info">
-              <div class="title" title="${fullName}">${track.trackName}</div>
-              <div class="artist">${track.artistName} • ${mins}:${secs}</div>
-            </div>
-            <button class="cast-btn" onclick="castSong('${fullName.replace(/'/g, "\\'")}')">Cast Live</button>
-          `;
-          resultsDiv.appendChild(card);
-        });
-      } catch (e) {
-        status.textContent = "Search error: " + e.message;
+      if (!data.results || data.results.length === 0) {
+        status.textContent = "No songs found. Try another search term.";
+        return;
       }
+
+      status.textContent = `Found ${data.results.length} tracks — click Cast Live to copy & open your broadcaster:`;
+
+      data.results.forEach(track => {
+        const fullName = `${track.artistName} - ${track.trackName}`;
+        const mins = Math.floor(track.trackTimeMillis / 60000);
+        const secs = String(Math.floor((track.trackTimeMillis % 60000) / 1000)).padStart(2, "0");
+
+        const card = document.createElement("div");
+        card.className = "item";
+
+        const img = document.createElement("img");
+        img.src = track.artworkUrl100;
+        img.alt = "Cover";
+
+        const info = document.createElement("div");
+        info.className = "info";
+        info.innerHTML = `
+          <div class="title" title="${fullName}">${track.trackName}</div>
+          <div class="artist">${track.artistName} • ${mins}:${secs}</div>
+        `;
+
+        const btn = document.createElement("button");
+        btn.className = "cast-btn";
+        btn.textContent = "Cast Live";
+        btn.onclick = () => castSong(fullName);
+
+        card.appendChild(img);
+        card.appendChild(info);
+        card.appendChild(btn);
+        resultsDiv.appendChild(card);
+      });
     }
 
     async function castSong(songTitle) {
