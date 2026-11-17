@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Caster.fm 96kbps Radio Control Panel</title>
+  <title>Caster.fm SoundCloud 96kbps Broadcaster</title>
   <style>
     body {
       font-family: system-ui, -apple-system, sans-serif;
@@ -22,7 +22,6 @@
       max-width: 550px;
     }
     h2 { margin-top: 0; color: #1f2937; }
-    .subtitle { font-size: 0.85rem; color: #6b7280; margin-top: -10px; margin-bottom: 16px; }
     .config-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -37,7 +36,6 @@
       font-size: 0.95rem;
       box-sizing: border-box;
     }
-    .full-width { grid-column: span 2; }
     .action-row {
       display: flex;
       gap: 8px;
@@ -49,13 +47,17 @@
       font-weight: 600;
       cursor: pointer;
     }
-    button.secondary { background-color: #2563eb; }
+    button.secondary { background-color: #ff5500; }
+    button.stop { background-color: #4b5563; }
     button:disabled { background-color: #9ca3af; cursor: not-allowed; }
     #status {
       margin-top: 14px;
       font-size: 0.9rem;
       color: #111827;
       line-height: 1.45;
+      background: #f3f4f6;
+      padding: 10px;
+      border-radius: 8px;
     }
     #results {
       margin-top: 18px;
@@ -73,8 +75,8 @@
       background: #f9fafb;
     }
     .result-item img {
-      width: 110px;
-      height: 62px;
+      width: 72px;
+      height: 72px;
       object-fit: cover;
       border-radius: 6px;
     }
@@ -99,22 +101,23 @@
 <body>
   <div class="card">
     <h2>Caster.fm Live Broadcaster</h2>
-    <p class="subtitle">Search YouTube, convert to 96 kbps MP3, stream live, and auto-delete.</p>
 
     <div class="config-grid">
       <input type="text" id="owner" placeholder="GitHub Username" oninput="saveConfig()">
       <input type="text" id="repo" placeholder="Repository Name" oninput="saveConfig()">
-      <input type="password" id="token" class="full-width" placeholder="Fine-Grained GitHub Token" oninput="saveConfig()">
+      <input type="text" id="branch" placeholder="Branch (e.g. main)" value="main" oninput="saveConfig()">
+      <input type="password" id="token" placeholder="Fine-Grained GitHub Token" oninput="saveConfig()">
     </div>
 
-    <input type="text" id="queryInput" placeholder="Search YouTube keywords or paste direct URL...">
+    <input type="text" id="queryInput" placeholder="Search SoundCloud or paste track URL...">
     
     <div class="action-row">
-      <button id="searchBtn" class="secondary" onclick="runSearch()">Search YouTube</button>
-      <button id="castBtn" onclick="triggerBroadcast()">Cast URL Live</button>
+      <button id="searchBtn" class="secondary" onclick="runSearch()">Search</button>
+      <button id="castBtn" onclick="triggerBroadcast()">Cast URL</button>
+      <button id="stopBtn" class="stop" onclick="stopBroadcast()">Stop</button>
     </div>
 
-    <div id="status"></div>
+    <div id="status">Ready. Fill in your GitHub details above to begin.</div>
     <div id="results"></div>
   </div>
 
@@ -122,12 +125,14 @@
     window.onload = () => {
       document.getElementById("owner").value = localStorage.getItem("gh_owner") || "";
       document.getElementById("repo").value = localStorage.getItem("gh_repo") || "";
+      document.getElementById("branch").value = localStorage.getItem("gh_branch") || "main";
       document.getElementById("token").value = localStorage.getItem("gh_token") || "";
     };
 
     function saveConfig() {
       localStorage.setItem("gh_owner", document.getElementById("owner").value.trim());
       localStorage.setItem("gh_repo", document.getElementById("repo").value.trim());
+      localStorage.setItem("gh_branch", document.getElementById("branch").value.trim() || "main");
       localStorage.setItem("gh_token", document.getElementById("token").value.trim());
     }
 
@@ -135,6 +140,7 @@
       return {
         owner: document.getElementById("owner").value.trim(),
         repo: document.getElementById("repo").value.trim(),
+        branch: document.getElementById("branch").value.trim() || "main",
         token: document.getElementById("token").value.trim()
       };
     }
@@ -145,39 +151,45 @@
     }
 
     async function runSearch() {
-      const { owner, repo, token } = getCredentials();
+      const { owner, repo, branch, token } = getCredentials();
       const query = document.getElementById("queryInput").value.trim();
       const status = document.getElementById("status");
       const resultsDiv = document.getElementById("results");
 
       if (!owner || !repo || !token || !query) {
-        status.textContent = "Please enter your GitHub credentials and a search term.";
+        status.textContent = "Please fill in all fields and enter a search term.";
         return;
       }
 
       setButtonsDisabled(true);
       resultsDiv.innerHTML = "";
-      status.textContent = "Searching YouTube via GitHub Actions (~15–20 seconds)...";
+      status.textContent = "Triggering SoundCloud search workflow...";
 
-      const dispatchUrl = `https://github.com{owner}/${repo}/actions/workflows/search.yml/dispatches`;
-      const res = await fetch(dispatchUrl, {
-        method: "POST",
-        headers: {
-          "Accept": "application/vnd.github+json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({ ref: "main", inputs: { query } })
-      });
+      try {
+        const dispatchUrl = `https://github.com{owner}/${repo}/actions/workflows/search.yml/dispatches`;
+        const res = await fetch(dispatchUrl, {
+          method: "POST",
+          headers: {
+            "Accept": "application/vnd.github+json",
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({ ref: branch, inputs: { query } })
+        });
 
-      if (res.status !== 204) {
-        status.textContent = "Failed to start search. Verify your repository name, branch ('main'), and token permissions.";
+        if (res.status !== 204) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(`HTTP ${res.status} (${errData.message || "Check repo, branch, or search.yml filename"})`);
+        }
+
+        status.textContent = "Searching SoundCloud via GitHub Actions (~15–20 seconds)...";
+        await waitForLatestRun(owner, repo, token, "search.yml");
+        await loadResults(owner, repo, token);
+      } catch (err) {
+        status.textContent = "Search Error: " + err.message;
+      } finally {
         setButtonsDisabled(false);
-        return;
       }
-
-      await waitForLatestRun(owner, repo, token, "search.yml");
-      await loadResults(owner, repo, token);
-      setButtonsDisabled(false);
     }
 
     async function waitForLatestRun(owner, repo, token, workflowFile) {
@@ -190,7 +202,7 @@
           cache: "no-store"
         });
         const data = await res.json();
-        const latestRun = data.workflow_runs && data.workflow_runs;
+        const latestRun = data.workflow_runs && data.workflow_runs[0];
 
         if (latestRun && latestRun.status === "completed") {
           return;
@@ -213,18 +225,18 @@
       });
 
       if (!res.ok) {
-        status.textContent = "Could not load search results. Check your repository's Actions tab for logs.";
+        status.textContent = "Workflow ran, but results.json was not found. Check the Actions log for errors.";
         return;
       }
 
       const items = await res.json();
-      status.textContent = `Found ${items.length} results:`;
+      status.textContent = `Found ${items.length} SoundCloud tracks:`;
 
       items.forEach(item => {
         const card = document.createElement("div");
         card.className = "result-item";
         card.innerHTML = `
-          <img src="${item.thumbnail}" alt="Thumbnail">
+          <img src="${item.thumbnail}" alt="Artwork">
           <div class="result-info">
             <div class="result-title" title="${item.title}">${item.title}</div>
             <div class="result-meta">Duration: ${item.duration}</div>
@@ -236,38 +248,45 @@
     }
 
     async function triggerBroadcast(selectedUrl) {
-      const { owner, repo, token } = getCredentials();
+      const { owner, repo, branch, token } = getCredentials();
       const url = selectedUrl || document.getElementById("queryInput").value.trim();
       const status = document.getElementById("status");
 
       if (!owner || !repo || !token || !url) {
-        status.textContent = "Please fill in your credentials and select a track.";
+        status.textContent = "Please fill in all fields and select a track.";
         return;
       }
 
       setButtonsDisabled(true);
-      status.textContent = "Dispatching broadcast workflow...";
+      status.textContent = "Starting Caster.fm broadcast...";
 
-      const apiUrl = `https://github.com{owner}/${repo}/actions/workflows/broadcast.yml/dispatches`;
-      const response = await fetch(apiUrl, {
-        method: "POST",
-        headers: {
-          "Accept": "application/vnd.github+json",
-          "Authorization": `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          ref: "main",
-          inputs: { url }
-        })
-      });
+      try {
+        const apiUrl = `https://github.com{owner}/${repo}/actions/workflows/broadcast.yml/dispatches`;
+        const response = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Accept": "application/vnd.github+json",
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            ref: branch,
+            inputs: { url }
+          })
+        });
 
-      if (response.status === 204) {
-        status.innerHTML = `<strong>On Air Soon!</strong> GitHub Actions is converting the track to 96 kbps MP3 and will begin streaming to Caster.fm in ~20 seconds. The audio file will automatically delete when playback ends. View live status in your <a href="https://github.com{owner}/${repo}/actions" target="_blank">Actions tab</a>.`;
-      } else {
-        status.textContent = "Error starting broadcast workflow. Check your token and URL.";
+        if (response.status === 204) {
+          status.innerHTML = `<strong>On Air Soon!</strong> Track is converting to 96 kbps MP3 and will stream to Caster.fm in ~20 seconds. <a href="https://github.com{owner}/${repo}/actions" target="_blank">View live log</a>.`;
+        } else {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(`HTTP ${response.status} (${errData.message || "Check repo, branch, or broadcast.yml filename"})`);
+        }
+      } catch (err) {
+        status.textContent = "Broadcast Error: " + err.message;
+      } finally {
+        setButtonsDisabled(false);
       }
-      setButtonsDisabled(false);
     }
-  </script>
-</body>
-</html>
+
+    async function stopBroadcast() {
+      const { owner, repo, token } = getCredentials();
