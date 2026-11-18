@@ -15,12 +15,24 @@ jobs:
   broadcast:
     runs-on: ubuntu-latest
     steps:
-      - name: Install FFmpeg and yt-dlp
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-          pip install --quiet --no-deps yt-dlp
+      - name: Restore Cached Tools
+        id: cache-tools
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/bin
+          key: radio-tools-v1
 
-      - name: Stream Live Immediately at 96kbps & Update Now Playing
+      - name: Install Tools (Only on Cache Miss)
+        if: steps.cache-tools.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/.local/bin
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          cp $(which ffmpeg) ~/.local/bin/ffmpeg
+          pip install --quiet --no-deps --target ~/.local/yt-dlp yt-dlp
+          printf '#!/usr/bin/env bash\nPYTHONPATH=~/.local/yt-dlp python3 -m yt_dlp "$@"\n' > ~/.local/bin/yt-dlp
+          chmod +x ~/.local/bin/yt-dlp ~/.local/bin/ffmpeg
+
+      - name: Stream Live at 96kbps & Update Now Playing
         env:
           INPUT_QUERY: ${{ github.event.inputs.query }}
           HOST: ${{ secrets.CASTER_HOST }}
@@ -28,6 +40,7 @@ jobs:
           MOUNT: ${{ secrets.CASTER_MOUNT }}
           PASS: ${{ secrets.CASTER_PASSWORD }}
         run: |
+          export PATH="$HOME/.local/bin:$PATH"
           CLEAN_HOST=$(echo "$HOST" | sed -E 's|^https?://||; s|/.*||; s|:.*||' | tr -d '[:space:]')
           CLEAN_PORT=$(echo "$PORT" | tr -d '[:space:]')
           CLEAN_MOUNT=$(echo "$MOUNT" | tr -d '[:space:]')
