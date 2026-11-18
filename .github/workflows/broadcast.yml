@@ -65,7 +65,7 @@ jobs:
           FFMPEG_PID=$!
 
           sleep 3
-          ENCODED_SONG=$(python3 -c 'import urllib.parse, os; print(urllib.parse.quote(os.environ["CLEAN_TITLE"]))' CLEAN_TITLE="$CLEAN_TITLE")
+          ENCODED_SONG=$(CLEAN_TITLE="$CLEAN_TITLE" python3 -c 'import urllib.parse, os; print(urllib.parse.quote(os.environ["CLEAN_TITLE"]))')
           curl -s -u "source:${PASS}" "http://${TARGET_HOST}:${CLEAN_PORT}/admin/metadata?mount=${CLEAN_MOUNT}&mode=updinfo&song=${ENCODED_SONG}" || true
 
           wait $FFMPEG_PID
