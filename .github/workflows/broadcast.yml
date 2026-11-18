@@ -15,10 +15,12 @@ jobs:
   broadcast:
     runs-on: ubuntu-latest
     steps:
-      - name: Install FFmpeg and yt-dlp
+      - name: Install yt-dlp (FFmpeg & curl are pre-installed)
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg curl
-          pip install -U yt-dlp
+          mkdir -p ~/.local/bin
+          curl -sL https://github.com -o ~/.local/bin/yt-dlp
+          chmod a+rx ~/.local/bin/yt-dlp
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Search & Download Full-Length Track (Skip 30s Previews)
         env:
@@ -26,8 +28,11 @@ jobs:
         run: |
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
-            yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
-            RAW_TITLE=$(yt-dlp --get-title "$INPUT_QUERY")
+            RAW_TITLE=$(yt-dlp -f "bestaudio/best" \
+              --no-playlist \
+              --print after_move:title \
+              -o "output/raw.%(ext)s" \
+              "$INPUT_QUERY")
           else
             yt-dlp -f "bestaudio/best" \
               --match-filter "duration > 60" \
@@ -42,7 +47,7 @@ jobs:
             yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
           fi
 
-          CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r"' | cut -c 1-80)
+          CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r' | cut -c 1-80)
           echo "TRACK_TITLE=$CLEAN_TITLE" >> $GITHUB_ENV
 
       - name: Stream Live at Strict 96kbps & Update Now Playing
