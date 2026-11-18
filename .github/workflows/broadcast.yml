@@ -16,20 +16,29 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ffmpeg curl
           pip install -U yt-dlp
 
-      - name: Search & Download Full Track
+      - name: Search & Download Full-Length Track (Skip 30s Previews)
         env:
           INPUT_QUERY: ${{ github.event.inputs.query }}
         run: |
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
-            TARGET="$INPUT_QUERY"
-            RAW_TITLE=$(yt-dlp --get-title "$TARGET")
+            yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
+            RAW_TITLE=$(yt-dlp --get-title "$INPUT_QUERY")
           else
-            TARGET="ytsearch1:${INPUT_QUERY} audio"
+            yt-dlp -f "bestaudio/best" \
+              --match-filter "duration > 60" \
+              --max-downloads 1 \
+              --no-playlist \
+              -o "output/raw.%(ext)s" \
+              "scsearch5:${INPUT_QUERY}" || true
             RAW_TITLE="$INPUT_QUERY"
           fi
 
-          yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$TARGET"
+          if [ ! -f output/raw.* ]; then
+            echo "No full-length match found, falling back to first available SoundCloud track..."
+            yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
+          fi
+
           CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r"' | cut -c 1-80)
           echo "TRACK_TITLE=$CLEAN_TITLE" >> $GITHUB_ENV
 
