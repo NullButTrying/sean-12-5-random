@@ -18,7 +18,7 @@ jobs:
       - name: Install yt-dlp (FFmpeg & curl are pre-installed)
         run: |
           mkdir -p ~/.local/bin
-          curl -sL https://github.com -o ~/.local/bin/yt-dlp
+          curl -fL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ~/.local/bin/yt-dlp
           chmod a+rx ~/.local/bin/yt-dlp
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
