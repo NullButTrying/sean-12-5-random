@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       query:
-        description: 'Song Name or SoundCloud URL'
+        description: 'Song Name or URL'
         required: true
 
 jobs:
@@ -16,7 +16,7 @@ jobs:
           sudo apt-get update && sudo apt-get install -y ffmpeg curl
           pip install -U yt-dlp
 
-      - name: Search/Download & Convert to Strict 96kbps MP3
+      - name: Search & Download Full Track
         env:
           INPUT_QUERY: ${{ github.event.inputs.query }}
         run: |
@@ -25,15 +25,15 @@ jobs:
             TARGET="$INPUT_QUERY"
             RAW_TITLE=$(yt-dlp --get-title "$TARGET")
           else
-            TARGET="scsearch1:$INPUT_QUERY"
+            TARGET="ytsearch1:${INPUT_QUERY} audio"
             RAW_TITLE="$INPUT_QUERY"
           fi
 
-          yt-dlp -x --audio-format mp3 --postprocessor-args "ffmpeg:-b:a 96k -ar 44100 -ac 2" -o "output/track.%(ext)s" "$TARGET"
+          yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$TARGET"
           CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r"' | cut -c 1-80)
           echo "TRACK_TITLE=$CLEAN_TITLE" >> $GITHUB_ENV
 
-      - name: Stream Live to Caster.fm & Update Now Playing
+      - name: Stream Live at Strict 96kbps & Update Now Playing
         env:
           HOST: ${{ secrets.CASTER_HOST }}
           PORT: ${{ secrets.CASTER_PORT }}
@@ -48,24 +48,22 @@ jobs:
           IPV4=$(getent ahostsv4 "$CLEAN_HOST" | awk '{print $1; exit}')
           TARGET_HOST=${IPV4:-$CLEAN_HOST}
 
-          # Start FFmpeg stream in the background
-          ffmpeg -re -i output/track.mp3 \
-            -c:a copy \
+          ffmpeg -re -i output/raw.* \
+            -vn \
+            -c:a libmp3lame -b:a 96k -ar 44100 -ac 2 \
             -content_type audio/mpeg \
             -ice_name "Live Auto Radio" \
             -f mp3 "icecast://source:${PASS}@${TARGET_HOST}:${CLEAN_PORT}${CLEAN_MOUNT}" &
           FFMPEG_PID=$!
 
-          # Wait 4 seconds for mountpoint to connect, then push Now Playing metadata to Icecast
           sleep 4
           ENCODED_SONG=$(python3 -c 'import urllib.parse, os; print(urllib.parse.quote(os.environ["TRACK_TITLE"]))')
           curl -s -u "source:${PASS}" "http://${TARGET_HOST}:${CLEAN_PORT}/admin/metadata?mount=${CLEAN_MOUNT}&mode=updinfo&song=${ENCODED_SONG}" || true
 
-          # Wait until the song finishes playing
           wait $FFMPEG_PID
 
       - name: Delete Temporary Audio File
         if: always()
         run: |
-          rm -rf output/track.mp3 output
-          echo "Temporary audio file wiped."
+          rm -rf output
+          echo "Temporary audio files wiped."
