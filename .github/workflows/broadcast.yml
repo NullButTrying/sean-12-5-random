@@ -15,15 +15,27 @@ jobs:
   broadcast:
     runs-on: ubuntu-latest
     steps:
-      - name: Install FFmpeg and yt-dlp
+      - name: Grab Standalone yt-dlp Binary (1s)
         run: |
-          sudo apt-get update && sudo apt-get install -y ffmpeg curl
-          pip install -U yt-dlp
+          curl -sL https://github.com -o /usr/local/bin/yt-dlp
+          chmod +x /usr/local/bin/yt-dlp
 
-      - name: Search & Download Full-Length Track (Skip 30s Previews)
+      - name: Stream Live Immediately at 96kbps & Update Now Playing
         env:
           INPUT_QUERY: ${{ github.event.inputs.query }}
+          HOST: ${{ secrets.CASTER_HOST }}
+          PORT: ${{ secrets.CASTER_PORT }}
+          MOUNT: ${{ secrets.CASTER_MOUNT }}
+          PASS: ${{ secrets.CASTER_PASSWORD }}
         run: |
+          CLEAN_HOST=$(echo "$HOST" | sed -E 's|^https?://||; s|/.*||; s|:.*||' | tr -d '[:space:]')
+          CLEAN_PORT=$(echo "$PORT" | tr -d '[:space:]')
+          CLEAN_MOUNT=$(echo "$MOUNT" | tr -d '[:space:]')
+          [[ "$CLEAN_MOUNT" != /* ]] && CLEAN_MOUNT="/$CLEAN_MOUNT"
+
+          IPV4=$(getent ahostsv4 "$CLEAN_HOST" | awk '{print $1; exit}')
+          TARGET_HOST=${IPV4:-$CLEAN_HOST}
+
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
             yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
@@ -42,26 +54,7 @@ jobs:
             yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
           fi
 
-          CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r' | cut -c 1-80)
-          echo "TRACK_TITLE=$CLEAN_TITLE" >> $GITHUB_ENV
-
-      - name: Stream Live at Strict 96kbps & Update Now Playing
-        env:
-          HOST: ${{ secrets.CASTER_HOST }}
-          PORT: ${{ secrets.CASTER_PORT }}
-          MOUNT: ${{ secrets.CASTER_MOUNT }}
-          PASS: ${{ secrets.CASTER_PASSWORD }}
-        run: |
-          CLEAN_HOST=$(echo "$HOST" | sed -E 's|^https?://||; s|/.*||; s|:.*||' | tr -d '[:space:]')
-          CLEAN_PORT=$(echo "$PORT" | tr -d '[:space:]')
-          CLEAN_MOUNT=$(echo "$MOUNT" | tr -d '[:space:]')
-          [[ "$CLEAN_MOUNT" != /* ]] && CLEAN_MOUNT="/$CLEAN_MOUNT"
-
-          IPV4=$(getent ahostsv4 "$CLEAN_HOST" | awk '{print $1; exit}')
-          TARGET_HOST=${IPV4:-$CLEAN_HOST}
-
-          # Brief pause so Icecast releases the previous song's mountpoint cleanly
-          sleep 3
+          CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r"' | cut -c 1-80)
 
           ffmpeg -re -i output/raw.* \
             -vn \
@@ -71,14 +64,9 @@ jobs:
             -f mp3 "icecast://source:${PASS}@${TARGET_HOST}:${CLEAN_PORT}${CLEAN_MOUNT}" &
           FFMPEG_PID=$!
 
-          sleep 4
-          ENCODED_SONG=$(python3 -c 'import urllib.parse, os; print(urllib.parse.quote(os.environ["TRACK_TITLE"]))')
+          sleep 3
+          ENCODED_SONG=$(python3 -c 'import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))' "$CLEAN_TITLE")
           curl -s -u "source:${PASS}" "http://${TARGET_HOST}:${CLEAN_PORT}/admin/metadata?mount=${CLEAN_MOUNT}&mode=updinfo&song=${ENCODED_SONG}" || true
 
           wait $FFMPEG_PID
-
-      - name: Delete Temporary Audio File
-        if: always()
-        run: |
           rm -rf output
-          echo "Temporary audio files wiped."
