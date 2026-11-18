@@ -7,6 +7,10 @@ on:
         description: 'Song Name or URL'
         required: true
 
+concurrency:
+  group: caster-fm-radio-queue
+  cancel-in-progress: false
+
 jobs:
   broadcast:
     runs-on: ubuntu-latest
@@ -35,7 +39,6 @@ jobs:
           fi
 
           if [ ! -f output/raw.* ]; then
-            echo "No full-length match found, falling back to first available SoundCloud track..."
             yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
           fi
 
@@ -56,6 +59,9 @@ jobs:
 
           IPV4=$(getent ahostsv4 "$CLEAN_HOST" | awk '{print $1; exit}')
           TARGET_HOST=${IPV4:-$CLEAN_HOST}
+
+          # Brief pause so Icecast releases the previous song's mountpoint cleanly
+          sleep 3
 
           ffmpeg -re -i output/raw.* \
             -vn \
