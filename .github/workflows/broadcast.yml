@@ -15,10 +15,8 @@ jobs:
   broadcast:
     runs-on: ubuntu-latest
     steps:
-      - name: Grab Standalone yt-dlp Binary (1s)
-        run: |
-          curl -sL https://github.com -o /usr/local/bin/yt-dlp
-          chmod +x /usr/local/bin/yt-dlp
+      - name: Install yt-dlp Fast (3s)
+        run: pip install --quiet --no-deps yt-dlp
 
       - name: Stream Live Immediately at 96kbps & Update Now Playing
         env:
@@ -65,7 +63,7 @@ jobs:
           FFMPEG_PID=$!
 
           sleep 3
-          ENCODED_SONG=$(python3 -c 'import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1]))' "$CLEAN_TITLE")
+          ENCODED_SONG=$(python3 -c 'import urllib.parse, sys; print(urllib.parse.quote(sys.argv))' "$CLEAN_TITLE")
           curl -s -u "source:${PASS}" "http://${TARGET_HOST}:${CLEAN_PORT}/admin/metadata?mount=${CLEAN_MOUNT}&mode=updinfo&song=${ENCODED_SONG}" || true
 
           wait $FFMPEG_PID
