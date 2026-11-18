@@ -15,12 +15,10 @@ jobs:
   broadcast:
     runs-on: ubuntu-latest
     steps:
-      - name: Install yt-dlp (FFmpeg & curl are pre-installed)
+      - name: Install FFmpeg and yt-dlp
         run: |
-          mkdir -p ~/.local/bin
-          curl -fL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o ~/.local/bin/yt-dlp
-          chmod a+rx ~/.local/bin/yt-dlp
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+          sudo apt-get update && sudo apt-get install -y ffmpeg curl
+          pip install -U yt-dlp
 
       - name: Search & Download Full-Length Track (Skip 30s Previews)
         env:
@@ -28,11 +26,8 @@ jobs:
         run: |
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
-            RAW_TITLE=$(yt-dlp -f "bestaudio/best" \
-              --no-playlist \
-              --print after_move:title \
-              -o "output/raw.%(ext)s" \
-              "$INPUT_QUERY")
+            yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
+            RAW_TITLE=$(yt-dlp --get-title "$INPUT_QUERY")
           else
             yt-dlp -f "bestaudio/best" \
               --match-filter "duration > 60" \
