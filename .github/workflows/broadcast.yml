@@ -19,18 +19,22 @@ jobs:
         id: cache-tools
         uses: actions/cache@v4
         with:
-          path: ~/.local/bin
-          key: radio-tools-v1
+          path: |
+            ~/.local/tools
+            ~/.local/apt-debs
+          key: radio-tools-v2
 
-      - name: Install Tools (Only on Cache Miss)
-        if: steps.cache-tools.outputs.cache-hit != 'true'
+      - name: Install Tools (From Cache or Fresh)
         run: |
-          mkdir -p ~/.local/bin
-          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
-          cp $(which ffmpeg) ~/.local/bin/ffmpeg
-          pip install --quiet --no-deps --target ~/.local/yt-dlp yt-dlp
-          printf '#!/usr/bin/env bash\nPYTHONPATH=~/.local/yt-dlp python3 -m yt_dlp "$@"\n' > ~/.local/bin/yt-dlp
-          chmod +x ~/.local/bin/yt-dlp ~/.local/bin/ffmpeg
+          mkdir -p ~/.local/tools ~/.local/apt-debs
+          if [ "${{ steps.cache-tools.outputs.cache-hit }}" != "true" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq -d -o dir::cache::archives="$HOME/.local/apt-debs" ffmpeg
+            pip install --quiet --no-deps --target ~/.local/tools/yt-dlp yt-dlp
+          fi
+          sudo dpkg -i ~/.local/apt-debs/*.deb >/dev/null 2>&1 || sudo apt-get install -y -qq ffmpeg
+          printf '#!/usr/bin/env bash\nPYTHONPATH="$HOME/.local/tools/yt-dlp" python3 -m yt_dlp "$@"\n' > ~/.local/tools/yt-dlp-bin
+          chmod +x ~/.local/tools/yt-dlp-bin
 
       - name: Stream Live at 96kbps & Update Now Playing
         env:
@@ -40,7 +44,7 @@ jobs:
           MOUNT: ${{ secrets.CASTER_MOUNT }}
           PASS: ${{ secrets.CASTER_PASSWORD }}
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
+          export PATH="$HOME/.local/tools:$PATH"
           CLEAN_HOST=$(echo "$HOST" | sed -E 's|^https?://||; s|/.*||; s|:.*||' | tr -d '[:space:]')
           CLEAN_PORT=$(echo "$PORT" | tr -d '[:space:]')
           CLEAN_MOUNT=$(echo "$MOUNT" | tr -d '[:space:]')
@@ -51,10 +55,10 @@ jobs:
 
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
-            yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
-            RAW_TITLE=$(yt-dlp --get-title "$INPUT_QUERY")
+            yt-dlp-bin -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
+            RAW_TITLE=$(yt-dlp-bin --get-title "$INPUT_QUERY")
           else
-            yt-dlp -f "bestaudio/best" \
+            yt-dlp-bin -f "bestaudio/best" \
               --match-filter "duration > 60" \
               --max-downloads 1 \
               --no-playlist \
@@ -64,13 +68,14 @@ jobs:
           fi
 
           if [ ! -f output/raw.* ]; then
-            yt-dlp -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
+            yt-dlp-bin -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
           fi
 
           CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r"' | cut -c 1-80)
 
           ffmpeg -re -i output/raw.* \
             -vn \
+            -af "apad=pad_dur=2" \
             -c:a libmp3lame -b:a 96k -ar 44100 -ac 2 \
             -content_type audio/mpeg \
             -ice_name "Live Auto Radio" \
