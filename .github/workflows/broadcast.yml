@@ -54,10 +54,10 @@ jobs:
 
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
-            yt-dlp-bin --socket-timeout 20 -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
-            RAW_TITLE=$(yt-dlp-bin --socket-timeout 20 --get-title "$INPUT_QUERY")
+            yt-dlp-bin --no-progress --socket-timeout 20 -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
+            RAW_TITLE=$(yt-dlp-bin --no-progress --socket-timeout 20 --get-title "$INPUT_QUERY")
           else
-            yt-dlp-bin --socket-timeout 20 -f "bestaudio/best" \
+            yt-dlp-bin --no-progress --socket-timeout 20 -f "bestaudio/best" \
               --match-filter "duration > 60" \
               --max-downloads 1 \
               --no-playlist \
@@ -68,13 +68,14 @@ jobs:
 
           RAW_FILE=$(find output -maxdepth 1 -type f -name 'raw.*' | head -n 1)
           if [ -z "$RAW_FILE" ]; then
-            yt-dlp-bin --socket-timeout 20 -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
+            yt-dlp-bin --no-progress --socket-timeout 20 -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
             RAW_FILE=$(find output -maxdepth 1 -type f -name 'raw.*' | head -n 1)
           fi
 
           CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r' | cut -c 1-80)
 
-          ffmpeg -re -rw_timeout 15000000 -i "$RAW_FILE" \
+          echo "Connecting to icecast://${TARGET_HOST}:${CLEAN_PORT}${CLEAN_MOUNT}..."
+          ffmpeg -loglevel info -stats -re -rw_timeout 15000000 -i "$RAW_FILE" \
             -vn \
             -af "apad=pad_dur=2" \
             -c:a libmp3lame -b:a 96k -ar 44100 -ac 2 \
@@ -83,9 +84,16 @@ jobs:
             -f mp3 "icecast://source:${PASS}@${TARGET_HOST}:${CLEAN_PORT}${CLEAN_MOUNT}" &
           FFMPEG_PID=$!
 
-          sleep 3
+          sleep 4
+          if ! kill -0 $FFMPEG_PID 2>/dev/null; then
+            echo "ERROR: ffmpeg exited immediately. Check your Caster.fm server status and secrets."
+            wait $FFMPEG_PID
+            exit 1
+          fi
+
           ENCODED_SONG=$(CLEAN_TITLE="$CLEAN_TITLE" python3 -c 'import urllib.parse, os; print(urllib.parse.quote(os.environ["CLEAN_TITLE"]))')
           curl -s --max-time 10 -u "source:${PASS}" "http://${TARGET_HOST}:${CLEAN_PORT}/admin/metadata?mount=${CLEAN_MOUNT}&mode=updinfo&song=${ENCODED_SONG}" || true
 
           wait $FFMPEG_PID
+          echo "Finished streaming $CLEAN_TITLE."
           rm -rf output
