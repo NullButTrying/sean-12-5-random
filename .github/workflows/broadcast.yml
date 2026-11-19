@@ -16,23 +16,26 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Restore Cached yt-dlp
+      - name: Restore Cached Tools
         id: cache-tools
         uses: actions/cache@v5
         with:
           path: ~/.local/tools
-          key: yt-dlp-${{ runner.os }}-${{ runner.arch }}-v1
+          key: radio-tools-${{ runner.os }}-${{ runner.arch }}-pip-v1
 
-      - name: Install yt-dlp & Verify ffmpeg
+      - name: Install yt-dlp & ffmpeg
         timeout-minutes: 3
         run: |
           mkdir -p ~/.local/tools
-          if [ ! -x ~/.local/tools/yt-dlp-bin ]; then
-            python3 -m pip install --disable-pip-version-check --timeout 30 --no-deps --target ~/.local/tools/yt-dlp yt-dlp
-            printf '#!/usr/bin/env bash\nPYTHONPATH="$HOME/.local/tools/yt-dlp" python3 -m yt_dlp "$@"\n' > ~/.local/tools/yt-dlp-bin
+          if [ ! -x ~/.local/tools/yt-dlp-bin ] || [ ! -x ~/.local/tools/ffmpeg ]; then
+            python3 -m pip install --disable-pip-version-check --timeout 30 --target ~/.local/tools/pylibs yt-dlp static-ffmpeg
+            PYTHONPATH="$HOME/.local/tools/pylibs" python3 -c "import static_ffmpeg, shutil; ff, _ = static_ffmpeg.run.get_or_fetch_platform_executables_else_raise(); shutil.copy2(ff, '$HOME/.local/tools/ffmpeg')"
+            chmod +x ~/.local/tools/ffmpeg
+
+            printf '#!/usr/bin/env bash\nPYTHONPATH="$HOME/.local/tools/pylibs" python3 -m yt_dlp "$@"\n' > ~/.local/tools/yt-dlp-bin
             chmod +x ~/.local/tools/yt-dlp-bin
           fi
-          ffmpeg -version | head -n 1
+          ~/.local/tools/ffmpeg -version | head -n 1
 
       - name: Stream Live at 96kbps & Update Now Playing
         timeout-minutes: 15
