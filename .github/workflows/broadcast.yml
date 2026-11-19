@@ -23,22 +23,21 @@ jobs:
           path: |
             ~/.local/tools
             ~/.local/apt-debs
-          key: radio-tools-${{ runner.os }}-${{ runner.arch }}-v3
+          key: radio-tools-${{ runner.os }}-${{ runner.arch }}-v4
 
       - name: Install Tools (From Cache or Fresh)
         timeout-minutes: 5
-        env:
-          DEBIAN_FRONTEND: noninteractive
-          NEEDRESTART_MODE: a
         run: |
           mkdir -p ~/.local/tools ~/.local/apt-debs
           if [ "${{ steps.cache-tools.outputs.cache-hit }}" != "true" ]; then
-            sudo -E apt-get update -qq
-            sudo -E apt-get install -y -qq -d -o dir::cache::archives="$HOME/.local/apt-debs" ffmpeg
+            sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -qq
+            sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq -d \
+              -o dir::cache::archives="$HOME/.local/apt-debs" \
+              ffmpeg
             pip install --quiet --no-deps --target ~/.local/tools/yt-dlp yt-dlp
           fi
 
-          sudo -E apt-get install -y -qq \
+          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq \
             -o dir::cache::archives="$HOME/.local/apt-debs" \
             -o Dpkg::Options::="--force-confdef" \
             -o Dpkg::Options::="--force-confold" \
