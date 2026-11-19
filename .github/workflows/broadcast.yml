@@ -14,31 +14,29 @@ concurrency:
 jobs:
   broadcast:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
     steps:
       - name: Restore Cached Tools
         id: cache-tools
-        uses: actions/cache@v5
+        uses: actions/cache@v4
         with:
-          path: ~/.local/tools
-          key: radio-tools-${{ runner.os }}-${{ runner.arch }}-pip-v1
+          path: |
+            ~/.local/tools
+            ~/.local/apt-debs
+          key: radio-tools-v2
 
-      - name: Install yt-dlp & ffmpeg
-        timeout-minutes: 3
+      - name: Install Tools (From Cache or Fresh)
         run: |
-          mkdir -p ~/.local/tools
-          if [ ! -x ~/.local/tools/yt-dlp-bin ] || [ ! -x ~/.local/tools/ffmpeg ]; then
-            python3 -m pip install --disable-pip-version-check --timeout 30 --target ~/.local/tools/pylibs yt-dlp static-ffmpeg
-            PYTHONPATH="$HOME/.local/tools/pylibs" python3 -c "import static_ffmpeg, shutil; ff, _ = static_ffmpeg.run.get_or_fetch_platform_executables_else_raise(); shutil.copy2(ff, '$HOME/.local/tools/ffmpeg')"
-            chmod +x ~/.local/tools/ffmpeg
-
-            printf '#!/usr/bin/env bash\nPYTHONPATH="$HOME/.local/tools/pylibs" python3 -m yt_dlp "$@"\n' > ~/.local/tools/yt-dlp-bin
-            chmod +x ~/.local/tools/yt-dlp-bin
+          mkdir -p ~/.local/tools ~/.local/apt-debs
+          if [ "${{ steps.cache-tools.outputs.cache-hit }}" != "true" ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq -d -o dir::cache::archives="$HOME/.local/apt-debs" ffmpeg
+            pip install --quiet --no-deps --target ~/.local/tools/yt-dlp yt-dlp
           fi
-          ~/.local/tools/ffmpeg -version | head -n 1
+          sudo dpkg -i ~/.local/apt-debs/*.deb >/dev/null 2>&1 || sudo apt-get install -y -qq ffmpeg
+          printf '#!/usr/bin/env bash\nPYTHONPATH="$HOME/.local/tools/yt-dlp" python3 -m yt_dlp "$@"\n' > ~/.local/tools/yt-dlp-bin
+          chmod +x ~/.local/tools/yt-dlp-bin
 
       - name: Stream Live at 96kbps & Update Now Playing
-        timeout-minutes: 15
         env:
           INPUT_QUERY: ${{ github.event.inputs.query }}
           HOST: ${{ secrets.CASTER_HOST }}
@@ -57,10 +55,10 @@ jobs:
 
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
-            yt-dlp-bin --no-progress --socket-timeout 20 -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
-            RAW_TITLE=$(yt-dlp-bin --no-progress --socket-timeout 20 --get-title "$INPUT_QUERY")
+            yt-dlp-bin -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
+            RAW_TITLE=$(yt-dlp-bin --get-title "$INPUT_QUERY")
           else
-            yt-dlp-bin --no-progress --socket-timeout 20 -f "bestaudio/best" \
+            yt-dlp-bin -f "bestaudio/best" \
               --match-filter "duration > 60" \
               --max-downloads 1 \
               --no-playlist \
@@ -69,16 +67,13 @@ jobs:
             RAW_TITLE="$INPUT_QUERY"
           fi
 
-          RAW_FILE=$(find output -maxdepth 1 -type f -name 'raw.*' | head -n 1)
-          if [ -z "$RAW_FILE" ]; then
-            yt-dlp-bin --no-progress --socket-timeout 20 -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
-            RAW_FILE=$(find output -maxdepth 1 -type f -name 'raw.*' | head -n 1)
+          if [ ! -f output/raw.* ]; then
+            yt-dlp-bin -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
           fi
 
           CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r' | cut -c 1-80)
 
-          echo "Connecting to icecast://${TARGET_HOST}:${CLEAN_PORT}${CLEAN_MOUNT}..."
-          ffmpeg -loglevel info -stats -re -rw_timeout 15000000 -i "$RAW_FILE" \
+          ffmpeg -re -i output/raw.* \
             -vn \
             -af "apad=pad_dur=2" \
             -c:a libmp3lame -b:a 96k -ar 44100 -ac 2 \
@@ -87,16 +82,9 @@ jobs:
             -f mp3 "icecast://source:${PASS}@${TARGET_HOST}:${CLEAN_PORT}${CLEAN_MOUNT}" &
           FFMPEG_PID=$!
 
-          sleep 4
-          if ! kill -0 $FFMPEG_PID 2>/dev/null; then
-            echo "ERROR: ffmpeg exited immediately. Check your Caster.fm server status and secrets."
-            wait $FFMPEG_PID
-            exit 1
-          fi
-
+          sleep 3
           ENCODED_SONG=$(CLEAN_TITLE="$CLEAN_TITLE" python3 -c 'import urllib.parse, os; print(urllib.parse.quote(os.environ["CLEAN_TITLE"]))')
-          curl -s --max-time 10 -u "source:${PASS}" "http://${TARGET_HOST}:${CLEAN_PORT}/admin/metadata?mount=${CLEAN_MOUNT}&mode=updinfo&song=${ENCODED_SONG}" || true
+          curl -s -u "source:${PASS}" "http://${TARGET_HOST}:${CLEAN_PORT}/admin/metadata?mount=${CLEAN_MOUNT}&mode=updinfo&song=${ENCODED_SONG}" || true
 
           wait $FFMPEG_PID
-          echo "Finished streaming $CLEAN_TITLE."
           rm -rf output
