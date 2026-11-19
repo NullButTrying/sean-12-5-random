@@ -14,39 +14,37 @@ concurrency:
 jobs:
   broadcast:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
     steps:
       - name: Restore Cached Tools
         id: cache-tools
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
-          path: |
-            ~/.local/tools
-            ~/.local/apt-debs
-          key: radio-tools-${{ runner.os }}-${{ runner.arch }}-v4
+          path: ~/.local/tools
+          key: radio-tools-${{ runner.os }}-${{ runner.arch }}-v6
 
       - name: Install Tools (From Cache or Fresh)
-        timeout-minutes: 5
+        timeout-minutes: 3
         run: |
-          mkdir -p ~/.local/tools ~/.local/apt-debs
-          if [ "${{ steps.cache-tools.outputs.cache-hit }}" != "true" ]; then
-            sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get update -qq
-            sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq -d \
-              -o dir::cache::archives="$HOME/.local/apt-debs" \
-              ffmpeg
-            pip install --quiet --no-deps --target ~/.local/tools/yt-dlp yt-dlp
+          set -x
+          mkdir -p ~/.local/tools
+          if [ ! -x ~/.local/tools/ffmpeg ] || [ ! -x ~/.local/tools/yt-dlp-bin ]; then
+            curl -fL --progress-bar --retry 2 --connect-timeout 15 --max-time 60 \
+              "https://github.com" \
+              -o /tmp/ffmpeg.tar.xz
+            tar -xJf /tmp/ffmpeg.tar.xz -C /tmp
+            mv /tmp/ffmpeg-master-latest-linux64-gpl/bin/ffmpeg ~/.local/tools/ffmpeg
+            chmod +x ~/.local/tools/ffmpeg
+            rm -rf /tmp/ffmpeg*
+
+            python3 -m pip install --disable-pip-version-check --timeout 30 --no-deps --target ~/.local/tools/yt-dlp yt-dlp
+            printf '#!/usr/bin/env bash\nPYTHONPATH="$HOME/.local/tools/yt-dlp" python3 -m yt_dlp "$@"\n' > ~/.local/tools/yt-dlp-bin
+            chmod +x ~/.local/tools/yt-dlp-bin
           fi
-
-          sudo env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -qq \
-            -o dir::cache::archives="$HOME/.local/apt-debs" \
-            -o Dpkg::Options::="--force-confdef" \
-            -o Dpkg::Options::="--force-confold" \
-            ffmpeg
-
-          printf '#!/usr/bin/env bash\nPYTHONPATH="$HOME/.local/tools/yt-dlp" python3 -m yt_dlp "$@"\n' > ~/.local/tools/yt-dlp-bin
-          chmod +x ~/.local/tools/yt-dlp-bin
+          ~/.local/tools/ffmpeg -version | head -n 1
 
       - name: Stream Live at 96kbps & Update Now Playing
+        timeout-minutes: 15
         env:
           INPUT_QUERY: ${{ github.event.inputs.query }}
           HOST: ${{ secrets.CASTER_HOST }}
@@ -65,10 +63,10 @@ jobs:
 
           mkdir -p output
           if [[ "$INPUT_QUERY" == http* ]]; then
-            yt-dlp-bin -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
-            RAW_TITLE=$(yt-dlp-bin --get-title "$INPUT_QUERY")
+            yt-dlp-bin --socket-timeout 20 -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "$INPUT_QUERY"
+            RAW_TITLE=$(yt-dlp-bin --socket-timeout 20 --get-title "$INPUT_QUERY")
           else
-            yt-dlp-bin -f "bestaudio/best" \
+            yt-dlp-bin --socket-timeout 20 -f "bestaudio/best" \
               --match-filter "duration > 60" \
               --max-downloads 1 \
               --no-playlist \
@@ -79,13 +77,13 @@ jobs:
 
           RAW_FILE=$(find output -maxdepth 1 -type f -name 'raw.*' | head -n 1)
           if [ -z "$RAW_FILE" ]; then
-            yt-dlp-bin -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
+            yt-dlp-bin --socket-timeout 20 -f "bestaudio/best" --no-playlist -o "output/raw.%(ext)s" "scsearch1:${INPUT_QUERY}"
             RAW_FILE=$(find output -maxdepth 1 -type f -name 'raw.*' | head -n 1)
           fi
 
           CLEAN_TITLE=$(echo "$RAW_TITLE" | tr -d '\n\r' | cut -c 1-80)
 
-          ffmpeg -re -i "$RAW_FILE" \
+          ffmpeg -re -rw_timeout 15000000 -i "$RAW_FILE" \
             -vn \
             -af "apad=pad_dur=2" \
             -c:a libmp3lame -b:a 96k -ar 44100 -ac 2 \
