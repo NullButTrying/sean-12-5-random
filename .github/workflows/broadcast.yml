@@ -16,32 +16,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Restore Cached Tools
+      - name: Restore Cached yt-dlp
         id: cache-tools
         uses: actions/cache@v5
         with:
           path: ~/.local/tools
-          key: radio-tools-${{ runner.os }}-${{ runner.arch }}-v6
+          key: yt-dlp-${{ runner.os }}-${{ runner.arch }}-v1
 
-      - name: Install Tools (From Cache or Fresh)
+      - name: Install yt-dlp & Verify ffmpeg
         timeout-minutes: 3
         run: |
-          set -x
           mkdir -p ~/.local/tools
-          if [ ! -x ~/.local/tools/ffmpeg ] || [ ! -x ~/.local/tools/yt-dlp-bin ]; then
-            curl -fL --progress-bar --retry 2 --connect-timeout 15 --max-time 60 \
-              "https://github.com" \
-              -o /tmp/ffmpeg.tar.xz
-            tar -xJf /tmp/ffmpeg.tar.xz -C /tmp
-            mv /tmp/ffmpeg-master-latest-linux64-gpl/bin/ffmpeg ~/.local/tools/ffmpeg
-            chmod +x ~/.local/tools/ffmpeg
-            rm -rf /tmp/ffmpeg*
-
+          if [ ! -x ~/.local/tools/yt-dlp-bin ]; then
             python3 -m pip install --disable-pip-version-check --timeout 30 --no-deps --target ~/.local/tools/yt-dlp yt-dlp
             printf '#!/usr/bin/env bash\nPYTHONPATH="$HOME/.local/tools/yt-dlp" python3 -m yt_dlp "$@"\n' > ~/.local/tools/yt-dlp-bin
             chmod +x ~/.local/tools/yt-dlp-bin
           fi
-          ~/.local/tools/ffmpeg -version | head -n 1
+          ffmpeg -version | head -n 1
 
       - name: Stream Live at 96kbps & Update Now Playing
         timeout-minutes: 15
